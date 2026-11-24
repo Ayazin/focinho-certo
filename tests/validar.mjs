@@ -7,7 +7,7 @@ import { iniciarServidor } from './server.mjs';
 
 const PORTA = 5199;
 const BASE = `http://localhost:${PORTA}/`;
-const ZAP = '5511999999999';
+const ZAP = '5511946636315';
 const require = createRequire(import.meta.url);
 const AXE = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
 mkdirSync('screenshots', { recursive: true });
@@ -374,7 +374,9 @@ await teste('Tags Open Graph completas e imagem de prévia 1200x630 disponível'
   for (const k of ['og:title', 'og:description', 'og:image', 'og:url', 'og:type', 'og:image:alt', 'twitter:card'])
     confirmar(og[k], 'falta ' + k);
   confirmar(og['twitter:card'] === 'summary_large_image', 'twitter:card');
-  const caminho = new URL(og['og:image']).pathname;
+  confirmar(og['og:url'] === 'https://ayazin.github.io/focinho-certo/', 'og:url: ' + og['og:url']);
+  confirmar(og['og:image'].startsWith(og['og:url']), 'og:image fora do endereço do site: ' + og['og:image']);
+  const caminho = '/' + og['og:image'].slice(og['og:url'].length); // mesmo arquivo, servido localmente
   const dim = await pg.evaluate(async src => { const i = new Image(); i.src = src; await i.decode(); return [i.naturalWidth, i.naturalHeight]; }, caminho);
   confirmar(dim[0] === 1200 && dim[1] === 630, 'imagem com ' + dim.join('x'));
   await pg.context().close();
