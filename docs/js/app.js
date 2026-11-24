@@ -289,7 +289,7 @@ function abrirPet(id) {
         <p>${esc(p.sobre)}</p>
         <dl class="pet-dados">
           ${linhaDado('i-pata', 'Raça', p.raca)}
-          ${linhaDado('i-sexo', 'Sexo', p.sexo)}
+          ${linhaDado(ehFemea(p) ? 'i-femea' : 'i-sexo', 'Sexo', p.sexo)}
           ${linhaDado('i-peso', 'Peso', p.peso)}
           ${linhaDado('i-local', 'Localização', p.localizacao)}
         </dl>

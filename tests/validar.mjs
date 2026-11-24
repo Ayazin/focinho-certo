@@ -75,6 +75,21 @@ for (const [rotulo, largura] of [['celular', 375], ['desktop', 1280]]) {
   await pg.context().close();
 }
 
+// Pipoca (coelho): card e detalhes
+for (const [rotulo, largura] of [['celular', 375], ['desktop', 1280]]) {
+  const pg = await novaPagina(largura);
+  await ir(pg, 'animais');
+  const card = pg.locator('#grade .pet', { has: pg.locator('a[href="#pet/pipoca"]') });
+  await card.scrollIntoViewIfNeeded();
+  await pg.waitForFunction(() => [...document.querySelectorAll('#grade img')].every(i => i.complete && i.naturalWidth));
+  await card.screenshot({ path: `screenshots/${rotulo}-11-card-pipoca.png` });
+  await pg.click('#grade a[href="#pet/pipoca"]');
+  await pg.waitForSelector('#dlg-pet[open]');
+  await pg.waitForFunction(() => [...document.querySelectorAll('#dlg-pet img')].every(i => i.complete && i.naturalWidth));
+  await shot(pg, `${rotulo}-12-detalhes-pipoca`, false);
+  await pg.context().close();
+}
+
 // ================= FLUXOS =================
 for (const largura of [375, 1280]) {
   const L = `[${largura}px]`;
@@ -331,6 +346,24 @@ await teste('[375px] Compartilhar usa navigator.share quando existe', async () =
   const d = await pg.evaluate(() => window.__compartilhado);
   confirmar(d && d.url === BASE + '#pet/pipoca', 'share não recebeu a URL: ' + JSON.stringify(d));
   confirmar(await toast(pg) !== 'Link copiado', 'não deveria copiar quando o share existe');
+  await pg.context().close();
+});
+
+await teste('Todas as fotos dos pets (pets.json) carregam e são quadradas', async () => {
+  const pg = await novaPagina(1280);
+  await ir(pg, 'animais');
+  const fotos = await pg.evaluate(async () => {
+    const pets = await (await fetch('data/pets.json')).json();
+    return Promise.all(pets.map(async p => {
+      const i = new Image(); i.src = p.foto;
+      try { await i.decode(); } catch { return [p.nome, 0, 0]; }
+      return [p.nome, i.naturalWidth, i.naturalHeight];
+    }));
+  });
+  for (const [nome, w, h] of fotos) {
+    confirmar(w > 0, `foto de ${nome} não carregou`);
+    confirmar(nome === 'Max' || Math.abs(w - h) <= 2, `foto de ${nome} não é quadrada (${w}x${h})`);
+  }
   await pg.context().close();
 });
 

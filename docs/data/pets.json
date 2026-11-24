@@ -48,7 +48,7 @@
     "id": "pipoca",
     "nome": "Pipoca",
     "especie": "outro",
-    "raca": "Coelho mini lop",
+    "raca": "Sem raça definida",
     "sexo": "Fêmea",
     "idade": 0.5,
     "porte": "Pequeno",
@@ -56,7 +56,7 @@
     "localizacao": "Santo André - SP",
     "personalidade": ["Calmo", "Tímido"],
     "sobre": "Pipoca é uma coelhinha delicada, que precisa de um ambiente calmo para se sentir segura. Depois que pega confiança, adora um cafuné. Está vermifugada.",
-    "foto": "img/pets/pipoca.svg",
-    "alt": "Ilustração de uma coelhinha branca de orelhas compridas e bochechas rosadas"
+    "foto": "img/pets/pipoca.jpg",
+    "alt": "Coelhinha branca de orelhas em pé e olhos rosados, sentada sobre a grama"
   }
 ]
