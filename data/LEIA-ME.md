@@ -1,6 +1,6 @@
 # Como adicionar um pet
 
-Edite `pets.json` e acrescente um objeto à lista (separe com vírgula). A foto vai em `img/pets/`.
+Edite `docs/data/pets.json` e acrescente um objeto à lista (separe com vírgula). A foto vai em `docs/img/pets/`.
 
 | Campo | O que é | Valores aceitos |
 |---|---|---|
@@ -15,8 +15,8 @@ Edite `pets.json` e acrescente um objeto à lista (separe com vírgula). A foto 
 | `localizacao` | cidade | texto, ex. `"São Paulo - SP"` |
 | `personalidade` | lista de traços (o 1º aparece no card) | `Ativo`, `Calmo`, `Sociável`, `Tímido`, `Brincalhão`, `Dócil`, `Curioso` |
 | `sobre` | descrição | texto |
-| `foto` | caminho da imagem | ex. `"img/pets/rex.jpg"` (quadrada de preferência) |
+| `foto` | caminho da imagem, relativo a `docs/` | ex. `"img/pets/rex.jpg"` (arquivo em `docs/img/pets/rex.jpg`, quadrado de preferência) |
 | `alt` | descrição da foto para leitores de tela | texto |
 
 O quiz e os filtros passam a considerar o novo pet automaticamente.
-O número do WhatsApp fica no topo de `js/app.js` (`WHATSAPP_NUMERO`).
+O número do WhatsApp fica no topo de `docs/js/app.js` (`WHATSAPP_NUMERO`).

@@ -347,6 +347,13 @@ await teste('Tags Open Graph completas e imagem de prévia 1200x630 disponível'
   await pg.context().close();
 });
 
+await teste('Só a pasta docs/ é servida (referencias/, tests/ e CLAUDE.md ficam fora do site)', async () => {
+  for (const caminho of ['referencias/site-atual.html', 'tests/validar.mjs', 'CLAUDE.md', 'package.json', 'data/LEIA-ME.md'])
+    confirmar((await fetch(BASE + caminho)).status === 404, caminho + ' não deveria estar no site');
+  for (const caminho of ['index.html', 'css/style.css', 'js/app.js', 'data/pets.json', 'img/og-preview.png'])
+    confirmar((await fetch(BASE + caminho)).status === 200, caminho + ' deveria estar no site');
+});
+
 await teste('Console do navegador sem erros (e nenhum arquivo 404)', async () => {
   confirmar(!errosConsole.length, [...new Set(errosConsole)].join(' ;; '));
 });
