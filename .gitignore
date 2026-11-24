@@ -1,6 +1,9 @@
 # Material de referência (telas do app com dados pessoais e fotos originais) – fica só no computador
 referencias/
 
+# Planilhas de estoque de gado (dados internos, sem relação com o site) – ficam só no computador
+EstoqueAnimais*.csv
+
 # Dependências
 node_modules/
 
