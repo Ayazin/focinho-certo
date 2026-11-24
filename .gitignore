@@ -1,0 +1,20 @@
+# Dependências
+node_modules/
+
+# Resultados de teste e screenshots (gerados por "npm test")
+screenshots/
+test-results/
+playwright-report/
+blob-report/
+coverage/
+
+# Configurações locais do Claude Code
+.claude/settings.local.json
+
+# Sistema / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+.vscode/
+.idea/

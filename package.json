@@ -1,0 +1,12 @@
+{
+  "name": "focinho-certo",
+  "private": true,
+  "scripts": {
+    "start": "node tests/server.mjs",
+    "test": "node tests/validar.mjs"
+  },
+  "devDependencies": {
+    "axe-core": "^4.10.2",
+    "playwright": "^1.49.1"
+  }
+}
