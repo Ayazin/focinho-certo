@@ -3,7 +3,7 @@
    ========================================================= */
 
 // ▼ Número do WhatsApp que recebe os contatos (DDI + DDD + número, só dígitos)
-const WHATSAPP_NUMERO = '5511946636315';
+const WHATSAPP_NUMERO = '5511957058468';
 
 const CUPOM = 'FOCINHOCERTO';
 const ARQUIVO_PETS = 'data/pets.json';
