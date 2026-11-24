@@ -323,6 +323,69 @@ button{font:inherit;color:inherit}
 .rodape nav a:hover{text-decoration:underline}
 .rodape .copy{max-width:1180px;margin-top:28px;font-size:14px;color:#cfe4dc}
 
+
+/* ============ Localização e mapas ============ */
+.perto{background:var(--card);border:1.5px solid var(--borda);border-radius:22px;padding:18px 20px;margin-top:16px;box-shadow:var(--sombra)}
+.perto-tit{font-size:21px;display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.perto-tit .ic{color:var(--verde)}
+.loc-acoes{display:flex;flex-wrap:wrap;align-items:center;gap:12px}
+.loc-gps{padding:11px 20px;font-size:16px}
+.loc-ou{color:var(--texto2);font-weight:500}
+.loc-busca{flex:1;min-width:240px;display:flex;border:1.5px solid #cfc6b2;border-radius:999px;background:#fff;overflow:hidden}
+.loc-busca:focus-within{border-color:var(--azul)}
+.loc-busca input{flex:1;min-width:0;border:0;background:none;padding:12px 18px;font:400 16px Roboto,sans-serif;color:var(--azul)}
+.loc-busca input::placeholder{color:#5d6283}
+.loc-busca input:focus{outline:none}
+.loc-busca .btn{border-radius:999px;padding:10px 22px;margin:3px;font-size:16px}
+.loc-busca .btn[disabled]{opacity:.6;cursor:progress}
+.loc-status{margin-top:10px;font-weight:500;line-height:1.5}
+.loc-status .ic{vertical-align:-3px;margin-right:4px}
+.loc-status .link-btn{margin-left:4px}
+.loc-status:empty{display:none}
+.loc-status.ok .ic{color:var(--verde)}
+.loc-status.erro{color:#8a2d24}
+.loc-nota{margin-top:8px;font-size:13.5px;color:var(--texto2)}
+.link-btn{border:0;background:none;padding:4px 2px;color:var(--verde);font:600 15px Roboto,sans-serif;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.localizador-c{background:var(--card);border:1.5px solid var(--borda);border-radius:var(--r);padding:14px 16px;margin-bottom:14px;box-shadow:var(--sombra)}
+
+.alternar{display:none}
+.mapa-w{margin-top:16px}
+.mapa{height:380px;border-radius:22px;border:1.5px solid var(--borda);overflow:hidden;background:#e8e2d3;z-index:0;box-shadow:var(--sombra)}
+.mapa-tosa{height:300px}
+.mapa-w-tosa{margin:0 0 14px}
+.mapa-nota{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13.5px;color:var(--texto2)}
+.mapa-nota .ic{width:18px;height:18px}
+.mapa-falha{height:100%;display:grid;place-items:center;text-align:center;padding:20px;color:var(--texto2);font-weight:500}
+.mapa .leaflet-control-attribution{font-size:11px;color:#333}
+.mapa .leaflet-control-attribution a{color:#0b4a3b}
+.mapa .leaflet-tooltip{font:500 14px Roboto,sans-serif;color:var(--azul)}
+.mapa .leaflet-popup-content{font:400 14px/1.45 Roboto,sans-serif;color:var(--azul)}
+.mapa .leaflet-popup-content em{color:#6b4f00}
+.pin-pet{display:block;width:48px;height:48px;border-radius:50%;border:4px solid var(--rosa);background:var(--rosa);overflow:hidden;box-shadow:0 3px 10px rgba(20,32,90,.35);transition:transform .15s}
+.pin-pet img{width:100%;height:100%;object-fit:cover;border-radius:50%}
+.pin-pet.pin-perto{border-color:var(--verde);transform:scale(1.15)}
+.leaflet-marker-icon:hover .pin-pet,.leaflet-marker-icon:focus-visible .pin-pet{transform:scale(1.15)}
+.leaflet-marker-icon:focus-visible{outline:3px solid var(--ouro);outline-offset:2px;border-radius:50%}
+.pin-voce{display:block;width:22px;height:22px;border-radius:50%;background:var(--azul);border:4px solid #fff;box-shadow:0 0 0 6px rgba(20,32,90,.25)}
+.pin-parceiro svg{filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
+.mapa-demo{display:flex;align-items:center;gap:6px;background:rgba(255,250,240,.95);border:1px solid var(--borda);border-radius:999px;padding:4px 12px;font:500 13px Roboto,sans-serif;color:var(--azul)}
+.mapa-demo .ic{color:#6b4f00}
+
+/* Card: localização e destaque do mais perto */
+.pet-local{display:flex;align-items:center;justify-content:center;gap:4px;margin:-6px 0 10px!important;font-size:14px!important;color:var(--verde)!important;font-weight:500}
+.pet-local .ic{flex:none;width:16px;height:16px}
+.pet-perto{border:2.5px solid var(--verde)}
+.selo-perto{position:absolute;top:12px;left:12px;z-index:2;display:inline-flex;align-items:center;gap:4px;background:var(--verde);color:#fff;border-radius:999px;padding:4px 12px 4px 8px;font:600 13px Fredoka,sans-serif;box-shadow:var(--sombra)}
+.parceiro-perto{border:2.5px solid var(--verde)}
+.p-dist{color:var(--verde)!important;font-weight:500}
+.p-ver{font-size:14px;align-self:flex-start;padding:2px 0}
+
+/* Avisos de projeto demonstrativo */
+.demo-aviso{display:flex;align-items:center;gap:6px;margin:10px 0 0!important;font-size:13.5px;color:var(--texto2)}
+.demo-aviso .ic,.demo-rodape .ic{width:18px;height:18px;flex:none}
+.rodape .demo-rodape{max-width:1180px;display:flex;align-items:center;gap:8px;margin-top:24px;font-size:14px;color:#e5f1ec}
+.copy a{color:#fff}
+
 /* Aviso (toast) */
 .toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,30px);background:var(--azul);color:#fff;padding:12px 24px;border-radius:999px;font-weight:500;opacity:0;pointer-events:none;transition:.25s;z-index:1000;box-shadow:0 8px 24px rgba(20,32,90,.3)}
 .toast.ver{opacity:1;transform:translate(-50%,0)}
@@ -416,6 +479,22 @@ button{font:inherit;color:inherit}
   .codigo span{font-size:17px;padding:10px 12px;min-width:0}
   .codigo button{padding:0 14px}
   .rodape-in{grid-template-columns:1fr}
+  .perto{padding:14px}
+  .perto-tit{font-size:19px}
+  .loc-acoes{gap:8px}
+  .loc-gps{width:100%}
+  .loc-ou{display:none}
+  .loc-busca{min-width:100%}
+  .alternar{display:grid;grid-template-columns:1fr 1fr;margin-top:14px;border:1.5px solid var(--azul);border-radius:999px;overflow:hidden}
+  .alternar button{display:flex;align-items:center;justify-content:center;gap:8px;border:0;background:transparent;padding:11px;font:600 16px Fredoka,sans-serif;color:var(--azul);cursor:pointer;min-height:46px}
+  .alternar button[aria-pressed=true]{background:var(--azul);color:#fff}
+  #mapa-pets-w{display:none}
+  .modo-mapa #mapa-pets-w{display:block}
+  .modo-mapa .grade,.modo-mapa .contagem{display:none}
+  .mapa{height:min(64vh,520px)}
+  .mapa-tosa{height:260px}
+  .selo-perto{top:8px;left:8px;font-size:11.5px;padding:3px 9px 3px 6px}
+  .pet-local{font-size:12.5px!important;flex-wrap:wrap}
   .rodape ul{justify-content:start}
   .inclui{flex-direction:column;align-items:flex-start;padding:20px}
 }

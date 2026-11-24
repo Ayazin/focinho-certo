@@ -9,7 +9,14 @@
     "porte": "Médio",
     "peso": "18 kg",
     "localizacao": "São Paulo - SP",
-    "personalidade": ["Ativo", "Sociável", "Brincalhão"],
+    "bairro": "Pinheiros",
+    "latitude": -23.567,
+    "longitude": -46.693,
+    "personalidade": [
+      "Ativo",
+      "Sociável",
+      "Brincalhão"
+    ],
     "sobre": "Biscoito é um cão muito carinhoso, cheio de energia e adora brincar. Se dá bem com pessoas e outros cães. Está vacinado, vermifugado e castrado.",
     "foto": "img/pets/biscoito.jpg",
     "alt": "Golden retriever de pelo dourado, com a língua para fora e expressão alegre"
@@ -24,7 +31,14 @@
     "porte": "Pequeno",
     "peso": "3,5 kg",
     "localizacao": "São Paulo - SP",
-    "personalidade": ["Curioso", "Calmo", "Dócil"],
+    "bairro": "Vila Mariana",
+    "latitude": -23.589,
+    "longitude": -46.635,
+    "personalidade": [
+      "Curioso",
+      "Calmo",
+      "Dócil"
+    ],
     "sobre": "Luna é uma gatinha frajola observadora, que adora explorar a casa e tirar longas sonecas no sol. Gosta de carinho no seu tempo. Está vacinada, vermifugada e castrada.",
     "foto": "img/pets/luna.jpg",
     "alt": "Gata preta e branca, estilo frajola, olhando para a câmera"
@@ -39,7 +53,14 @@
     "porte": "Pequeno",
     "peso": "11 kg",
     "localizacao": "Campinas - SP",
-    "personalidade": ["Dócil", "Sociável", "Calmo"],
+    "bairro": "Cambuí",
+    "latitude": -22.894,
+    "longitude": -47.05,
+    "personalidade": [
+      "Dócil",
+      "Sociável",
+      "Calmo"
+    ],
     "sobre": "Max é um beagle tranquilo e muito companheiro. Adora passeios curtos, se dá bem com crianças e é ótimo para apartamento. Está vacinado, vermifugado e castrado.",
     "foto": "img/pets/max.jpg",
     "alt": "Beagle de orelhas caídas, pelagem tricolor e coleira vermelha"
@@ -54,7 +75,13 @@
     "porte": "Pequeno",
     "peso": "1,8 kg",
     "localizacao": "Santo André - SP",
-    "personalidade": ["Calmo", "Tímido"],
+    "bairro": "Centro",
+    "latitude": -23.654,
+    "longitude": -46.533,
+    "personalidade": [
+      "Calmo",
+      "Tímido"
+    ],
     "sobre": "Pipoca é uma coelhinha delicada, que precisa de um ambiente calmo para se sentir segura. Depois que pega confiança, adora um cafuné. Está vermifugada.",
     "foto": "img/pets/pipoca.jpg",
     "alt": "Coelhinha branca de orelhas em pé e olhos rosados, sentada sobre a grama"

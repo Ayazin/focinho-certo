@@ -1,16 +1,50 @@
 // Validação completa do site com Playwright: npm test
 // Gera screenshots em screenshots/ e testa os fluxos principais.
+// Nada aqui depende de internet para os mapas: o Leaflet vem de node_modules, e o
+// Nominatim, o ViaCEP e os mapas do OpenStreetMap são simulados (FC_MAPA_REAL=1 usa mapas reais só nos screenshots).
 import { chromium } from 'playwright';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { deflateSync, crc32 } from 'node:zlib';
 import { iniciarServidor } from './server.mjs';
 
 const PORTA = 5199;
 const BASE = `http://localhost:${PORTA}/`;
-const ZAP = '5511946636315';
+// número do WhatsApp lido do próprio site, para o teste acompanhar trocas futuras
+const ZAP = readFileSync(new URL('../docs/js/app.js', import.meta.url), 'utf8').match(/WHATSAPP_NUMERO = '(\d+)'/)[1];
 const require = createRequire(import.meta.url);
 const AXE = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
+const LEAFLET = {
+  'leaflet.js': [readFileSync(require.resolve('leaflet/dist/leaflet.js')), 'text/javascript'],
+  'leaflet.css': [readFileSync(require.resolve('leaflet/dist/leaflet.css')), 'text/css']
+};
 mkdirSync('screenshots', { recursive: true });
+
+// Ladrilho de mapa falso (PNG 1x1 bege) para não usar os servidores do OpenStreetMap nos testes
+function pngSolido(r, g, b) {
+  const bloco = (tipo, dados) => {
+    const t = Buffer.from(tipo, 'ascii'), tam = Buffer.alloc(4), crc = Buffer.alloc(4);
+    tam.writeUInt32BE(dados.length); crc.writeUInt32BE(crc32(Buffer.concat([t, dados])));
+    return Buffer.concat([tam, t, dados, crc]);
+  };
+  const ihdr = Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0]);
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), bloco('IHDR', ihdr), bloco('IDAT', deflateSync(Buffer.from([0, r, g, b]))), bloco('IEND', Buffer.alloc(0))]);
+}
+const LADRILHO = pngSolido(232, 226, 211);
+
+// Respostas falsas do ViaCEP e do Nominatim
+const VIACEP_FALSO = {
+  '04101000': { cep: '04101-000', logradouro: 'Rua Vergueiro', bairro: 'Vila Mariana', localidade: 'São Paulo', uf: 'SP' },
+  '99999999': { erro: 'true' }
+};
+const NOMINATIM_FALSO = [
+  ['rua vergueiro', { lat: '-23.588', lon: '-46.636', display_name: 'Rua Vergueiro, Vila Mariana, São Paulo', address: { suburb: 'Vila Mariana', city: 'São Paulo' } }],
+  ['cambui', { lat: '-22.893', lon: '-47.052', display_name: 'Cambuí, Campinas', address: { suburb: 'Cambuí', city: 'Campinas' } }],
+  ['santo andre', { lat: '-23.655', lon: '-46.532', display_name: 'Centro, Santo André', address: { suburb: 'Centro', city: 'Santo André' } }],
+  ['pinheiros', { lat: '-23.566', lon: '-46.690', display_name: 'Pinheiros, São Paulo', address: { suburb: 'Pinheiros', city: 'São Paulo' } }]
+];
+const chamadas = { nominatim: [], viacep: [] };
+const semAcento = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 const resultados = [];
 const errosConsole = [];
@@ -23,18 +57,44 @@ function confirmar(cond, msg) { if (!cond) throw new Error(msg); }
 const srv = await iniciarServidor(PORTA);
 const nav = await chromium.launch({ channel: process.env.PW_CANAL || 'chrome' }); // usa o Chrome instalado (PW_CANAL=msedge para o Edge)
 
-async function novaPagina(largura, { semShare = true } = {}) {
+async function novaPagina(largura, { semShare = true, geo = null, negarGeo = false, semLeaflet = false, mapaReal = false, registrarErros = true } = {}) {
   const ctx = await nav.newContext({
     viewport: { width: largura, height: largura < 768 ? 812 : 860 },
     deviceScaleFactor: 1,
-    permissions: ['clipboard-read', 'clipboard-write'],
+    permissions: ['clipboard-read', 'clipboard-write', ...(geo ? ['geolocation'] : [])],
+    ...(geo ? { geolocation: geo } : {}),
     reducedMotion: 'reduce'
   });
   if (semShare) await ctx.addInitScript(() => { try { delete Navigator.prototype.share; delete Navigator.prototype.canShare; } catch {} });
+  if (negarGeo) await ctx.addInitScript(() => {
+    navigator.geolocation.getCurrentPosition = (_ok, erro) => setTimeout(() => erro({ code: 1, PERMISSION_DENIED: 1, message: 'User denied Geolocation' }), 50);
+  });
+  // Leaflet do CDN → cópia local idêntica (o hash SRI do index.html também é verificado pelo navegador)
+  await ctx.route('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/*', rota => {
+    const arq = rota.request().url().split('/').pop();
+    if (semLeaflet || !LEAFLET[arq]) return rota.abort();
+    const [body, contentType] = LEAFLET[arq];
+    return rota.fulfill({ body, contentType, headers: { 'Access-Control-Allow-Origin': '*' } });
+  });
+  if (!mapaReal) await ctx.route('https://tile.openstreetmap.org/**', rota => rota.fulfill({ body: LADRILHO, contentType: 'image/png' }));
+  await ctx.route('https://nominatim.openstreetmap.org/**', rota => {
+    const u = new URL(rota.request().url());
+    const q = u.searchParams.get('q') || '';
+    chamadas.nominatim.push({ q, t: Date.now(), params: Object.fromEntries(u.searchParams) });
+    const achado = NOMINATIM_FALSO.find(([chave]) => semAcento(q).includes(chave));
+    return rota.fulfill({ json: achado ? [achado[1]] : [], headers: { 'Access-Control-Allow-Origin': '*' } });
+  });
+  await ctx.route('https://viacep.com.br/ws/**', rota => {
+    const cep = rota.request().url().match(/ws\/(\d+)\//)?.[1];
+    chamadas.viacep.push(cep);
+    return rota.fulfill({ json: VIACEP_FALSO[cep] || { erro: 'true' }, headers: { 'Access-Control-Allow-Origin': '*' } });
+  });
   const pg = await ctx.newPage();
-  pg.on('console', m => { if (m.type() === 'error') errosConsole.push(`[${largura}px] ${m.text()}`); });
-  pg.on('pageerror', e => errosConsole.push(`[${largura}px] ${e.message}`));
-  pg.on('response', r => { if (r.status() >= 400) errosConsole.push(`[${largura}px] HTTP ${r.status()} ${r.url()}`); });
+  if (registrarErros) {
+    pg.on('console', m => { if (m.type() === 'error') errosConsole.push(`[${largura}px] ${m.text()}`); });
+    pg.on('pageerror', e => errosConsole.push(`[${largura}px] ${e.message}`));
+    pg.on('response', r => { if (r.status() >= 400) errosConsole.push(`[${largura}px] HTTP ${r.status()} ${r.url()}`); });
+  }
   return pg;
 }
 const ir = async (pg, hash = '') => { await pg.goto('about:blank'); await pg.goto(BASE + (hash ? '#' + hash : '')); await pg.waitForSelector('#grade .pet, #grade .vazio', { state: 'attached' }); await pg.evaluate(() => document.fonts.ready); };
@@ -42,6 +102,7 @@ const contagem = pg => pg.$$eval('#grade .pet', l => l.length);
 const nomesGrade = pg => pg.$$eval('#grade .pet h2', l => l.map(x => x.textContent.trim()));
 const toast = pg => pg.textContent('#toast');
 const shot = (pg, nome, full = true) => pg.screenshot({ path: `screenshots/${nome}.png`, fullPage: full });
+const esperarMapa = async (pg, sel = '#mapa-pets') => { await pg.waitForSelector(`${sel} .leaflet-marker-icon`); await pg.waitForTimeout(250); };
 
 // ================= SCREENSHOTS =================
 for (const [rotulo, largura] of [['celular', 375], ['desktop', 1280]]) {
@@ -87,6 +148,31 @@ for (const [rotulo, largura] of [['celular', 375], ['desktop', 1280]]) {
   await pg.waitForSelector('#dlg-pet[open]');
   await pg.waitForFunction(() => [...document.querySelectorAll('#dlg-pet img')].every(i => i.complete && i.naturalWidth));
   await shot(pg, `${rotulo}-12-detalhes-pipoca`, false);
+  await pg.context().close();
+}
+
+// Animais e Banho & Tosa com localização (FC_MAPA_REAL=1 usa mapas reais do OpenStreetMap)
+for (const [rotulo, largura] of [['celular', 375], ['desktop', 1280]]) {
+  const pg = await novaPagina(largura, { geo: { latitude: -23.561, longitude: -46.690 }, mapaReal: process.env.FC_MAPA_REAL === '1' });
+  await ir(pg, 'animais');
+  await pg.click('[data-page="animais"] [data-usar-local]');
+  await pg.waitForSelector('#grade .selo-perto');
+  if (largura >= 1024) await esperarMapa(pg);
+  await pg.waitForTimeout(process.env.FC_MAPA_REAL === '1' ? 2500 : 300);
+  await shot(pg, `${rotulo}-13-animais-perto`);
+  if (largura < 1024) {
+    await pg.click('[data-modo="mapa"]');
+    await esperarMapa(pg);
+    await pg.waitForTimeout(process.env.FC_MAPA_REAL === '1' ? 2500 : 300);
+    await pg.locator('.perto').scrollIntoViewIfNeeded();
+    await shot(pg, `${rotulo}-14-animais-mapa`, false);
+  }
+  await pg.click(largura < 900 ? '#menu-btn' : '[data-nav="beneficios"]');
+  if (largura < 900) await pg.click('[data-nav="beneficios"]');
+  await pg.evaluate(() => { location.hash = 'beneficios/tosa'; });
+  await esperarMapa(pg, '#mapa-parceiros');
+  await pg.waitForTimeout(process.env.FC_MAPA_REAL === '1' ? 2500 : 300);
+  await pg.locator('#tosa .grid-tosa').screenshot({ path: `screenshots/${rotulo}-15-banho-tosa-mapa.png` });
   await pg.context().close();
 }
 
@@ -347,6 +433,229 @@ await teste('[375px] Compartilhar usa navigator.share quando existe', async () =
   confirmar(d && d.url === BASE + '#pet/pipoca', 'share não recebeu a URL: ' + JSON.stringify(d));
   confirmar(await toast(pg) !== 'Link copiado', 'não deveria copiar quando o share existe');
   await pg.context().close();
+});
+
+// ================= MAPA, LOCALIZAÇÃO E DISTÂNCIAS =================
+const PINHEIROS = { latitude: -23.561, longitude: -46.690 };
+const MORUMBI = { latitude: -23.601, longitude: -46.718 };
+const locGrade = pg => pg.$$eval('#grade .pet', l => l.map(c => [c.querySelector('h2').textContent.trim(), c.querySelector('.pet-local')?.textContent.trim(), Boolean(c.querySelector('.selo-perto'))]));
+const statusLoc = pg => pg.$eval('[data-page="animais"] .loc-status', e => e.textContent.trim());
+const buscarEnd = async (pg, texto, raiz = '[data-page="animais"]') => {
+  await pg.fill(`${raiz} [data-busca-local] input`, texto);
+  await pg.click(`${raiz} [data-busca-local] button`);
+  await pg.waitForFunction(r => { const s = document.querySelector(`${r} .loc-status`); return s && /ok|erro/.test(s.className); }, raiz, { timeout: 8000 });
+};
+const zerarChamadas = () => { chamadas.nominatim.length = 0; chamadas.viacep.length = 0; };
+
+for (const largura of [375, 1280]) {
+  const L = `[${largura}px]`;
+  const celular = largura < 1024;
+
+  await teste(`${L} "Usar minha localização" ordena do mais perto ao mais longe e destaca o mais próximo`, async () => {
+    zerarChamadas();
+    const pg = await novaPagina(largura, { geo: PINHEIROS });
+    await ir(pg, 'animais');
+    confirmar(JSON.stringify(await nomesGrade(pg)) === '["Biscoito","Luna","Max","Pipoca"]', 'ordem inicial mudou');
+    confirmar((await locGrade(pg))[0][1] === 'Pinheiros, São Paulo', 'sem localização deveria mostrar "Bairro, Cidade": ' + (await locGrade(pg))[0][1]);
+    await pg.click('[data-page="animais"] [data-usar-local]');
+    await pg.waitForSelector('#grade .selo-perto');
+    const g = await locGrade(pg);
+    confirmar(JSON.stringify(g.map(x => x[0])) === '["Biscoito","Luna","Pipoca","Max"]', 'ordem por distância: ' + g.map(x => x[0]));
+    confirmar(g[0][2] && !g.slice(1).some(x => x[2]), 'só o primeiro deveria ter o selo "Mais perto de você"');
+    confirmar(/^Pinheiros · a (menos de 1|\d+) km$/.test(g[0][1]), 'texto do Biscoito: ' + g[0][1]);
+    confirmar(/^Vila Mariana · a \d+ km$/.test(g[1][1]), 'texto da Luna: ' + g[1][1]);
+    confirmar(/^Cambuí, Campinas · a \d+ km$/.test(g[3][1]), 'acima de 30 km deveria mostrar a cidade: ' + g[3][1]);
+    confirmar((await statusLoc(pg)).includes('sua localização atual'), 'status: ' + await statusLoc(pg));
+    confirmar((await pg.textContent('#contagem')).includes('do mais perto para o mais longe'), 'contagem sem a ordem');
+    confirmar(chamadas.nominatim.length === 0 && chamadas.viacep.length === 0, 'o GPS não deveria consultar serviços externos');
+    if (!celular) {
+      const z = await pg.evaluate(() => mapas['mapa-pets'].getZoom());
+      confirmar(z >= 10, `com localização o mapa deveria aproximar da região (zoom ${z})`);
+    }
+    const salvo = await pg.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }));
+    confirmar(!/-23\.56|-46\.69/.test(salvo), 'a localização não deveria ser salva no navegador');
+
+    // filtros continuam valendo junto com a distância
+    const raiz = celular ? '#dlg-filtros' : '.filtros-lateral';
+    const filtro = async (k, v) => { if (celular) await pg.click('#filtro-btn'); await pg.click(`${raiz} .chip[data-k="${k}"][data-v="${v}"]`); if (celular) await pg.click('#aplicar'); };
+    await filtro('especie', 'gato');
+    const s1 = await locGrade(pg);
+    confirmar(s1.length === 1 && s1[0][0] === 'Luna' && s1[0][2], 'Gatos: Luna deveria ser a única e a mais perto');
+    await filtro('especie', 'todos');
+    await filtro('personalidade', 'Calmo');
+    confirmar(JSON.stringify(await nomesGrade(pg)) === '["Luna","Pipoca","Max"]', 'Calmo + distância: ' + await nomesGrade(pg));
+
+    // detalhes mostram bairro e distância
+    await pg.click('#grade a[href="#pet/max"]');
+    await pg.waitForSelector('#dlg-pet[open]');
+    const locDet = await pg.$eval('#dlg-pet .pet-dados div:last-child dd', e => e.textContent);
+    confirmar(/^Cambuí, Campinas - SP · a \d+ km$/.test(locDet), 'detalhes: ' + locDet);
+    await pg.keyboard.press('Escape');
+
+    await pg.click('[data-page="animais"] [data-limpar-local]');
+    confirmar(!(await pg.$('#grade .selo-perto')), '"Remover" deveria tirar a ordem por distância');
+    await pg.context().close();
+  });
+
+  await teste(`${L} Permissão de localização negada mostra mensagem amigável`, async () => {
+    const pg = await novaPagina(largura, { negarGeo: true });
+    await ir(pg, 'animais');
+    await pg.click('[data-page="animais"] [data-usar-local]');
+    await pg.waitForFunction(() => document.querySelector('[data-page="animais"] .loc-status').classList.contains('erro'));
+    const st = await statusLoc(pg);
+    confirmar(st.startsWith('Tudo bem!') && st.includes('bairro ou CEP'), 'mensagem: ' + st);
+    confirmar(await pg.evaluate(() => document.activeElement.id) === 'end-animais', 'o foco deveria ir para o campo de endereço');
+    confirmar(JSON.stringify(await nomesGrade(pg)) === '["Biscoito","Luna","Max","Pipoca"]', 'a ordem não deveria mudar');
+    await pg.context().close();
+  });
+
+  await teste(`${L} CEP: ViaCEP + Nominatim (respostas simuladas), CEP inexistente e endereço não encontrado`, async () => {
+    zerarChamadas();
+    const pg = await novaPagina(largura);
+    await ir(pg, 'animais');
+    await buscarEnd(pg, '04101-000');
+    confirmar(JSON.stringify(chamadas.viacep) === '["04101000"]', 'ViaCEP: ' + chamadas.viacep);
+    confirmar(chamadas.nominatim.length === 1 && chamadas.nominatim[0].q.startsWith('Rua Vergueiro'), 'Nominatim: ' + JSON.stringify(chamadas.nominatim.map(c => c.q)));
+    const p = chamadas.nominatim[0].params;
+    confirmar(p.countrycodes === 'br' && p.limit === '1' && p.format === 'jsonv2', 'parâmetros do Nominatim: ' + JSON.stringify(p));
+    confirmar((await statusLoc(pg)).includes('Vila Mariana, São Paulo'), 'status: ' + await statusLoc(pg));
+    confirmar((await nomesGrade(pg))[0] === 'Luna', 'Luna (Vila Mariana) deveria ser a primeira');
+
+    zerarChamadas();
+    await buscarEnd(pg, '99999-999');
+    confirmar((await statusLoc(pg)).startsWith('CEP não encontrado'), 'CEP inexistente: ' + await statusLoc(pg));
+    confirmar(chamadas.nominatim.length === 0, 'não deveria consultar o Nominatim com CEP inexistente');
+
+    await buscarEnd(pg, 'lugar que não existe');
+    confirmar((await statusLoc(pg)).startsWith('Não encontramos esse endereço'), 'não encontrado: ' + await statusLoc(pg));
+    await pg.context().close();
+  });
+
+  await teste(`${L} Endereço digitado (Cambuí, Campinas): distâncias acima de 30 km mostram a cidade`, async () => {
+    const pg = await novaPagina(largura);
+    await ir(pg, 'animais');
+    await buscarEnd(pg, 'Cambuí, Campinas');
+    const g = await locGrade(pg);
+    confirmar(g[0][0] === 'Max' && g[0][2], 'Max deveria ser o mais perto: ' + g.map(x => x[0]));
+    confirmar(/^Cambuí · a (menos de 1|\d+) km$/.test(g[0][1]), 'Max: ' + g[0][1]);
+    confirmar(g.slice(1).every(x => /^[^,]+, (São Paulo|Santo André) · a \d+ km$/.test(x[1])), 'os outros deveriam mostrar a cidade: ' + g.map(x => x[1]));
+    await pg.context().close();
+  });
+
+  await teste(`${L} Mapa dos pets: atribuição do OpenStreetMap, um marcador por pet filtrado e clique abre os detalhes`, async () => {
+    const pg = await novaPagina(largura);
+    await ir(pg, 'animais');
+    if (celular) {
+      confirmar(!(await pg.isVisible('#mapa-pets')), 'no celular o mapa começa escondido (modo Lista)');
+      await pg.click('[data-modo="mapa"]');
+      confirmar(await pg.getAttribute('[data-modo="mapa"]', 'aria-pressed') === 'true', 'aria-pressed do botão Mapa');
+      confirmar(!(await pg.isVisible('#grade')), 'no modo Mapa a lista deveria sumir');
+    }
+    await esperarMapa(pg);
+    const atrib = await pg.textContent('#mapa-pets .leaflet-control-attribution');
+    confirmar(atrib.includes('OpenStreetMap'), 'atribuição: ' + atrib);
+    confirmar(await pg.isVisible('#mapa-pets .leaflet-control-attribution a[href*="openstreetmap.org/copyright"]'), 'link da atribuição não visível');
+    confirmar(await pg.$$eval('#mapa-pets .mapa-pet', l => l.length) === 4, 'deveria haver 4 marcadores');
+    confirmar(await pg.getAttribute('#mapa-pets .leaflet-control-zoom-in', 'title') === 'Aproximar', 'botões de zoom em português');
+    // zoom funciona mesmo com "movimento reduzido" (os testes rodam com reducedMotion: 'reduce')
+    const z0 = await pg.evaluate(() => mapas['mapa-pets'].getZoom());
+    await pg.click('#mapa-pets .leaflet-control-zoom-in');
+    await pg.waitForTimeout(150);
+    confirmar(await pg.evaluate(() => mapas['mapa-pets'].getZoom()) === z0 + 1, 'o botão "Aproximar" não mudou o zoom');
+    if (celular) { await pg.click('[data-modo="lista"]'); await pg.click('#filtro-btn'); await pg.click('#dlg-filtros .chip[data-k="especie"][data-v="gato"]'); await pg.click('#aplicar'); await pg.click('[data-modo="mapa"]'); }
+    else await pg.click('.filtros-lateral .chip[data-k="especie"][data-v="gato"]');
+    await pg.waitForTimeout(200);
+    confirmar(await pg.$$eval('#mapa-pets .mapa-pet', l => l.length) === 1, 'com filtro Gatos deveria haver 1 marcador');
+    await pg.click('#mapa-pets .mapa-pet-luna');
+    await pg.waitForSelector('#dlg-pet[open]');
+    confirmar((await pg.textContent('#pet-nome')).includes('Luna'), 'marcador não abriu a Luna');
+    await pg.keyboard.press('Escape');
+    await pg.waitForFunction(() => location.hash === '#animais');
+    // teclado: marcador focável abre com Enter
+    await pg.focus('#mapa-pets .mapa-pet-luna');
+    await pg.keyboard.press('Enter');
+    await pg.waitForSelector('#dlg-pet[open]', { timeout: 3000 });
+    await pg.keyboard.press('Escape');
+    if (celular) {
+      await pg.click('[data-modo="lista"]');
+      confirmar(await pg.isVisible('#grade') && !(await pg.isVisible('#mapa-pets')), 'voltar para Lista');
+    }
+    await pg.context().close();
+  });
+
+  await teste(`${L} Banho & Tosa: parceiros do JSON no mapa, aviso de demonstração e ordem por distância`, async () => {
+    const pg = await novaPagina(largura, { geo: MORUMBI });
+    await ir(pg, 'beneficios/tosa');
+    await esperarMapa(pg, '#mapa-parceiros');
+    confirmar(await pg.$$eval('#parceiros-lista .parceiro', l => l.length) === 3, 'deveria listar 3 parceiros');
+    confirmar(await pg.$$eval('#mapa-parceiros .pin-parceiro', l => l.length) === 3, 'deveria haver 3 alfinetes');
+    confirmar((await pg.textContent('#mapa-parceiros .mapa-demo')).includes('Pontos de demonstração'), 'aviso de demonstração no mapa');
+    confirmar((await pg.textContent('#mapa-parceiros .leaflet-control-attribution')).includes('OpenStreetMap'), 'atribuição no mapa de parceiros');
+    await pg.click('[data-localizador="tosa"] [data-usar-local]');
+    await pg.waitForSelector('.parceiro-perto');
+    const nomes = await pg.$$eval('#parceiros-lista .p-info strong', l => l.map(x => x.textContent));
+    confirmar(nomes[0] === 'Amor & Patas', 'Amor & Patas (Morumbi) deveria ser o primeiro: ' + nomes);
+    const dist = await pg.$eval('#parceiros-lista .parceiro-perto .p-dist', e => e.textContent);
+    confirmar(/^Morumbi · a (menos de 1|\d+) km$/.test(dist), 'distância do parceiro: ' + dist);
+    confirmar((await pg.textContent('[data-page="animais"] .loc-status')).includes('sua localização'), 'a localização deveria valer também para Animais');
+    await pg.click('[data-ver-parceiro="amor-e-patas"]');
+    await pg.waitForSelector('#mapa-parceiros .leaflet-popup');
+    confirmar((await pg.textContent('#mapa-parceiros .leaflet-popup')).includes('Endereço de demonstração'), 'popup sem aviso de demonstração');
+    await pg.context().close();
+  });
+}
+
+await teste('[1280px] Limite de 1 requisição por segundo no Nominatim (e cache de buscas repetidas)', async () => {
+  zerarChamadas();
+  const pg = await novaPagina(1280);
+  await ir(pg, 'animais');
+  await buscarEnd(pg, 'Pinheiros');
+  await buscarEnd(pg, 'Centro, Santo André');
+  confirmar(chamadas.nominatim.length === 2, 'deveriam ser 2 chamadas: ' + chamadas.nominatim.length);
+  const intervalo = chamadas.nominatim[1].t - chamadas.nominatim[0].t;
+  confirmar(intervalo >= 1000, `intervalo entre chamadas de ${intervalo} ms (mínimo 1000)`);
+  await buscarEnd(pg, 'Pinheiros');
+  confirmar(chamadas.nominatim.length === 2, 'busca repetida deveria vir do cache');
+  // o campo de busca não consulta nada enquanto a pessoa digita
+  await pg.fill('[data-page="animais"] [data-busca-local] input', 'Vila Madalena, São Paulo');
+  await pg.waitForTimeout(1300);
+  confirmar(chamadas.nominatim.length === 2, 'digitar não deveria consultar o Nominatim');
+  await pg.context().close();
+});
+
+await teste('[1280px] Sem o Leaflet (CDN fora do ar), a lista e as distâncias continuam funcionando', async () => {
+  const pg = await novaPagina(1280, { semLeaflet: true, geo: PINHEIROS, registrarErros: false });
+  const erros = [];
+  pg.on('pageerror', e => erros.push(e.message));
+  await ir(pg, 'animais');
+  confirmar(await pg.isVisible('#mapa-pets .mapa-falha'), 'deveria mostrar aviso no lugar do mapa');
+  await pg.click('[data-page="animais"] [data-usar-local]');
+  await pg.waitForSelector('#grade .selo-perto');
+  confirmar((await nomesGrade(pg))[0] === 'Biscoito', 'ordem por distância sem mapa');
+  confirmar(!erros.length, 'erros de JavaScript: ' + erros.join(' | '));
+  await pg.context().close();
+});
+
+await teste('Avisos de projeto demonstrativo no rodapé e perto do cupom', async () => {
+  const pg = await novaPagina(375);
+  await ir(pg, 'beneficios/tosa');
+  confirmar((await pg.textContent('.cupom .demo-aviso')).includes('Projeto demonstrativo'), 'aviso do cupom');
+  confirmar(await pg.isVisible('.cupom .demo-aviso'), 'aviso do cupom não visível');
+  const rod = await pg.textContent('.rodape .demo-rodape');
+  confirmar(/Projeto demonstrativo/.test(rod) && /parceiras/.test(rod) && /planos/.test(rod), 'aviso do rodapé: ' + rod);
+  confirmar((await pg.textContent('.rodape .copy')).includes('OpenStreetMap'), 'crédito do OpenStreetMap no rodapé');
+  await pg.context().close();
+});
+
+await teste('Dados de localização: pets com coordenadas aproximadas (3 casas) e parceiros marcados como demonstração', async () => {
+  const pets = JSON.parse(readFileSync(new URL('../docs/data/pets.json', import.meta.url), 'utf8'));
+  for (const p of pets) {
+    confirmar(p.bairro && typeof p.latitude === 'number' && typeof p.longitude === 'number', `${p.nome} sem bairro/coordenadas`);
+    const casas = n => (String(n).split('.')[1] || '').length;
+    confirmar(casas(p.latitude) <= 3 && casas(p.longitude) <= 3, `${p.nome}: use no máximo 3 casas decimais (centro do bairro), não o endereço exato`);
+  }
+  const parc = JSON.parse(readFileSync(new URL('../docs/data/parceiros.json', import.meta.url), 'utf8'));
+  confirmar(parc.length === 3 && parc.every(p => typeof p.latitude === 'number' && p.demonstracao === true), 'parceiros.json');
 });
 
 await teste('Todas as fotos dos pets (pets.json) carregam e são quadradas', async () => {

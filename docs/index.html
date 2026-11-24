@@ -28,6 +28,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<!-- Mapa: Leaflet 1.9.4 (versão fixa, com verificação de integridade) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -47,6 +49,10 @@
   <symbol id="i-compartilhar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.8l7.4-4.4M8.3 13.2l7.4 4.4"/></symbol>
   <symbol id="i-sexo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10" cy="15" r="5"/><path d="M14 11l6-6m-4 0h4v4"/></symbol>
   <symbol id="i-femea" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="9" r="5"/><path d="M12 14v7m-3-3h6"/></symbol>
+  <symbol id="i-mira" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3"/></symbol>
+  <symbol id="i-lista" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.2" fill="currentColor"/><circle cx="4.5" cy="12" r="1.2" fill="currentColor"/><circle cx="4.5" cy="18" r="1.2" fill="currentColor"/></symbol>
+  <symbol id="i-mapa" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14m6-12v14"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.6" r="1.1" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-peso" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 9h14l1.5 11h-17z"/><path d="M9 9a3 3 0 016 0"/><path d="M10 15h4" stroke-linecap="round"/></symbol>
   <symbol id="i-local" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0114 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
   <symbol id="i-raca" viewBox="0 0 32 30"><use href="#i-pata"/></symbol>
@@ -190,6 +196,18 @@
             <svg class="ic"><use href="#i-filtro"/></svg><span>Filtros</span><span class="badge" id="badge" hidden></span>
           </button>
         </div>
+        <section class="perto" aria-labelledby="t-perto">
+          <h2 id="t-perto" class="perto-tit"><svg class="ic" aria-hidden="true"><use href="#i-local"/></svg>Pets perto de você</h2>
+          <div class="localizador" data-localizador="animais"></div>
+        </section>
+        <div class="alternar" role="group" aria-label="Ver pets em">
+          <button type="button" data-modo="lista" aria-pressed="true"><svg class="ic" aria-hidden="true"><use href="#i-lista"/></svg>Lista</button>
+          <button type="button" data-modo="mapa" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-mapa"/></svg>Mapa</button>
+        </div>
+        <div class="mapa-w" id="mapa-pets-w">
+          <div class="mapa" id="mapa-pets" role="region" aria-label="Mapa com a região aproximada de cada pet. As mesmas informações estão na lista."></div>
+          <p class="mapa-nota"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>Os círculos mostram o bairro de cada pet, não o endereço exato.</p>
+        </div>
         <p class="contagem" id="contagem" role="status" aria-live="polite"></p>
         <div class="grade" id="grade"></div>
       </div>
@@ -261,26 +279,11 @@
       <div class="grid-tosa">
         <div>
           <h3 class="h-sec">Unidades parceiras perto de você</h3>
-          <ul class="parceiros">
-            <li class="parceiro">
-              <span class="p-logo pl-1" aria-hidden="true">Pet<br>Clean</span>
-              <div class="p-info"><strong>Pet Clean</strong><span>Vila Madalena · 1,2 km</span><span>Banho • Tosa • Hidratação</span></div>
-              <span class="nota" aria-label="Nota 4,8 de 5">4,8 ★</span>
-              <div class="p-preco"><span class="off">30% OFF</span><small>a partir de</small><b>R$ 45,50</b></div>
-            </li>
-            <li class="parceiro">
-              <span class="p-logo pl-2" aria-hidden="true">Estilo<br>Pet</span>
-              <div class="p-info"><strong>Estilo Pet</strong><span>Campo Limpo · 2,4 km</span><span>Banho • Tosa • Spa • Hidratação</span></div>
-              <span class="nota" aria-label="Nota 4,7 de 5">4,7 ★</span>
-              <div class="p-preco"><span class="off">25% OFF</span><small>a partir de</small><b>R$ 52,50</b></div>
-            </li>
-            <li class="parceiro">
-              <span class="p-logo pl-3" aria-hidden="true"><svg><use href="#i-pata"/></svg>Amor &amp;<br>Patas</span>
-              <div class="p-info"><strong>Amor &amp; Patas</strong><span>Morumbi · 3,1 km</span><span>Banho • Tosa • Hidratação</span></div>
-              <span class="nota" aria-label="Nota 4,9 de 5">4,9 ★</span>
-              <div class="p-preco"><span class="off">20% OFF</span><small>a partir de</small><b>R$ 39,90</b></div>
-            </li>
-          </ul>
+          <div class="localizador localizador-c" data-localizador="tosa"></div>
+          <div class="mapa-w mapa-w-tosa">
+            <div class="mapa mapa-tosa" id="mapa-parceiros" role="region" aria-label="Mapa das unidades parceiras. As mesmas informações estão na lista."></div>
+          </div>
+          <ul class="parceiros" id="parceiros-lista"></ul>
         </div>
         <div>
           <h3 class="h-sec">Serviços mais buscados</h3>
@@ -300,6 +303,7 @@
                 <button type="button" id="copiar-cupom" aria-label="Copiar cupom FOCINHOCERTO"><svg class="ic"><use href="#i-copiar"/></svg><span>Copiar</span></button>
               </div>
               <small>Válido em todas as unidades parceiras</small>
+              <p class="demo-aviso"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>Projeto demonstrativo: cupom e unidades parceiras são fictícios.</p>
             </div>
             <svg class="deco-coracao dc4" aria-hidden="true"><use href="#i-coracao"/></svg>
           </div>
@@ -348,7 +352,8 @@
       </ul>
     </nav>
   </div>
-  <p class="w copy">© 2026 Focinho Certo</p>
+  <p class="w demo-rodape"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg>Projeto demonstrativo: as unidades parceiras, os planos de saúde, os preços e o cupom são fictícios.</p>
+  <p class="w copy">© 2026 Focinho Certo · Mapas © colaboradores do <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></p>
 </footer>
 
 <!-- Janela: detalhes do pet -->
@@ -369,6 +374,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="js/app.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+<script defer src="js/app.js"></script>
 </body>
 </html>

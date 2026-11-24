@@ -7,6 +7,7 @@ const WHATSAPP_NUMERO = '5511957058468';
 
 const CUPOM = 'FOCINHOCERTO';
 const ARQUIVO_PETS = 'data/pets.json';
+const ARQUIVO_PARCEIROS = 'data/parceiros.json';
 
 /* ---------- Utilidades ---------- */
 const $ = (s, el = document) => el.querySelector(s);
@@ -183,27 +184,30 @@ function filtrar() {
 }
 
 /* ---------- Cards de pets ---------- */
-function cardPet(p, nivel = 3) {
+function cardPet(p, nivel = 3, maisPerto = false) {
   const fav = favoritos.has(p.id);
-  return `<article class="pet">
+  return `<article class="pet${maisPerto ? ' pet-perto' : ''}">
+    ${maisPerto ? `<span class="selo-perto">${icone('i-local', 'ic ic-s')}Mais perto de você</span>` : ''}
     <button type="button" class="fav" data-fav="${esc(p.id)}" aria-pressed="${fav}" aria-label="Favoritar ${esc(p.nome)}">${icone('i-coracao')}</button>
     <div class="foto"><img src="${esc(p.foto)}" alt="${esc(p.alt || p.nome)}" loading="lazy" width="220" height="220"></div>
     <h${nivel}><a class="pet-link" href="#pet/${esc(p.id)}">${esc(p.nome)}</a></h${nivel}>
     <p>${textoIdade(p.idade)} • ${esc(p.porte)}</p>
+    ${p.bairro ? `<p class="pet-local">${icone('i-local', 'ic ic-s')}<span>${esc(textoLocal(p))}</span></p>` : ''}
     <span class="tag">${esc(p.personalidade[0] || '')}</span>
   </article>`;
 }
 
 function desenharGrade() {
-  const lista = filtrar();
+  const lista = ordenarPorDistancia(filtrar());
   const n = (estado.especie !== 'todos') + (estado.porte !== 'todos') + (estado.idade !== 'todos') + estado.personalidade.size;
   const badge = $('#badge');
   badge.hidden = !n; badge.textContent = n;
   $('#filtro-btn').setAttribute('aria-label', n ? `Filtros (${n} ativos)` : 'Filtros');
-  $('#contagem').textContent = `${lista.length} ${lista.length === 1 ? 'pet encontrado' : 'pets encontrados'}`;
+  $('#contagem').textContent = `${lista.length} ${lista.length === 1 ? 'pet encontrado' : 'pets encontrados'}${local && lista.length > 1 ? ', do mais perto para o mais longe' : ''}`;
   $('#grade').innerHTML = lista.length
-    ? lista.map(p => cardPet(p, 2)).join('')
+    ? lista.map((p, i) => cardPet(p, 2, Boolean(local) && i === 0)).join('')
     : `<div class="vazio"><svg aria-hidden="true"><use href="#i-pata"/></svg><p>Nenhum pet encontrado com esses filtros.</p><button type="button" class="btn btn-o" data-limpar-vazio>Limpar filtros</button></div>`;
+  atualizarMapaPets(lista);
 }
 document.addEventListener('click', e => { if (e.target.closest('[data-limpar-vazio]')) { limparFiltros(); $('#q-animais').focus(); } });
 
@@ -253,6 +257,300 @@ function desenharCarrossel() {
   }, { passive: true });
 }
 
+/* ---------- Localização, distâncias e mapas ---------- */
+// A localização da pessoa fica só na memória desta página: não é salva nem enviada a servidores.
+// Endereços digitados são consultados no ViaCEP (CEP) e no Nominatim/OpenStreetMap (coordenadas).
+const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+const VIACEP_URL = 'https://viacep.com.br/ws/';
+const INTERVALO_NOMINATIM_MS = 1100; // política do Nominatim: no máximo 1 requisição por segundo
+const RAIO_PET_M = 700;              // círculo aproximado em volta do centro do bairro
+const CENTRO_PADRAO = [-23.55, -46.63]; // São Paulo
+let PARCEIROS = [];
+let local = null; // { lat, lon, rotulo }
+
+function distanciaKm(a, b) {
+  const la1 = a.lat ?? a.latitude, lo1 = a.lon ?? a.longitude, la2 = b.lat ?? b.latitude, lo2 = b.lon ?? b.longitude;
+  const rad = x => x * Math.PI / 180, R = 6371;
+  const dLa = rad(la2 - la1), dLo = rad(lo2 - lo1);
+  const h = Math.sin(dLa / 2) ** 2 + Math.cos(rad(la1)) * Math.cos(rad(la2)) * Math.sin(dLo / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+const textoDistancia = km => (km < 1 ? 'a menos de 1 km' : `a ${Math.round(km).toLocaleString('pt-BR')} km`);
+const cidadeDe = x => String(x.localizacao || x.cidade || '').split(' - ')[0];
+// "Pinheiros · a 3 km"; acima de 30 km inclui a cidade: "Cambuí, Campinas · a 87 km"
+function textoLocal(x) {
+  if (!local) return `${x.bairro}, ${cidadeDe(x)}`;
+  const km = distanciaKm(local, x);
+  return `${km > 30 ? `${x.bairro}, ${cidadeDe(x)}` : x.bairro} · ${textoDistancia(km)}`;
+}
+function ordenarPorDistancia(lista) {
+  if (!local) return lista;
+  return [...lista].sort((a, b) => distanciaKm(local, a) - distanciaKm(local, b));
+}
+
+/* Consultas externas */
+let filaNominatim = Promise.resolve(), ultimaNominatim = 0;
+const cacheGeo = new Map();
+function consultarNominatim(q) {
+  const chave = semAcento(q.trim());
+  if (cacheGeo.has(chave)) return cacheGeo.get(chave);
+  const pedido = filaNominatim.then(async () => {
+    const espera = ultimaNominatim + INTERVALO_NOMINATIM_MS - Date.now();
+    if (espera > 0) await new Promise(ok => setTimeout(ok, espera));
+    ultimaNominatim = Date.now();
+    const params = new URLSearchParams({ q, format: 'jsonv2', limit: '1', countrycodes: 'br', addressdetails: '1', 'accept-language': 'pt-BR' });
+    const r = await fetch(`${NOMINATIM_URL}?${params}`);
+    if (!r.ok) throw new Error('Nominatim ' + r.status);
+    const [res] = await r.json();
+    return res ? { lat: Number(res.lat), lon: Number(res.lon), endereco: res.address || {}, nome: res.display_name || q } : null;
+  });
+  filaNominatim = pedido.catch(() => {});
+  cacheGeo.set(chave, pedido);
+  pedido.catch(() => cacheGeo.delete(chave));
+  return pedido;
+}
+async function consultarCep(cep) {
+  const r = await fetch(`${VIACEP_URL}${cep}/json/`);
+  if (!r.ok) throw new Error('ViaCEP ' + r.status);
+  const j = await r.json();
+  return j.erro ? null : j;
+}
+class ErroBusca extends Error {}
+async function buscarEndereco(texto) {
+  const limpo = texto.trim();
+  if (/^\d{5}-?\d{3}$/.test(limpo)) {
+    const e = await consultarCep(limpo.replace(/\D/g, ''));
+    if (!e) throw new ErroBusca('CEP não encontrado. Confira os números ou digite o nome do bairro.');
+    const tentativas = [[e.logradouro, e.bairro, e.localidade, e.uf], [e.bairro, e.localidade, e.uf], [e.localidade, e.uf]]
+      .map(l => l.filter(Boolean).join(', ')).filter((v, i, a) => v && a.indexOf(v) === i);
+    for (const q of tentativas) {
+      const res = await consultarNominatim(q);
+      if (res) return { lat: res.lat, lon: res.lon, rotulo: [e.bairro, e.localidade].filter(Boolean).join(', ') };
+    }
+    throw new ErroBusca('Encontramos o CEP, mas não conseguimos marcá-lo no mapa. Tente digitar o bairro e a cidade.');
+  }
+  const res = await consultarNominatim(limpo);
+  if (!res) throw new ErroBusca('Não encontramos esse endereço. Tente incluir o bairro e a cidade (ex.: Pinheiros, São Paulo).');
+  const a = res.endereco;
+  const bairro = a.suburb || a.neighbourhood || a.quarter || a.city_district;
+  const cidade = a.city || a.town || a.village || a.municipality;
+  return { lat: res.lat, lon: res.lon, rotulo: [bairro, cidade].filter(Boolean).join(', ') || res.nome.split(',').slice(0, 2).join(',') };
+}
+
+/* Formulários de localização (Animais e Banho & Tosa compartilham o mesmo estado) */
+$$('[data-localizador]').forEach(el => {
+  const id = el.dataset.localizador;
+  el.innerHTML = `
+    <div class="loc-acoes">
+      <button type="button" class="btn btn-o loc-gps" data-usar-local>${icone('i-mira')}Usar minha localização</button>
+      <span class="loc-ou" aria-hidden="true">ou</span>
+      <form class="loc-busca" data-busca-local novalidate>
+        <label class="sr" for="end-${id}">Rua, bairro ou CEP</label>
+        <input id="end-${id}" type="text" placeholder="Rua, bairro ou CEP" autocomplete="off" enterkeyhint="search">
+        <button type="submit" class="btn">Buscar</button>
+      </form>
+    </div>
+    <p class="loc-status" role="status" aria-live="polite"></p>
+    <p class="loc-nota">Sua localização fica só no seu navegador. Endereços digitados são consultados no ViaCEP e no OpenStreetMap.</p>`;
+});
+function statusLocal(html, tipo = '') {
+  $$('.loc-status').forEach(p => { p.innerHTML = html; p.className = `loc-status ${tipo}`; });
+}
+function definirLocal(novo) {
+  local = novo;
+  if (local) statusLocal(`${icone('i-local', 'ic ic-s')}<span>Distâncias a partir de <strong>${esc(local.rotulo)}</strong>.</span> <button type="button" class="link-btn" data-limpar-local>Remover</button>`, 'ok');
+  else statusLocal('');
+  desenharGrade();
+  desenharParceiros();
+  if (dlgPet.open && petAberto) abrirPet(petAberto.id);
+}
+function usarLocalizacao(origem) {
+  const campo = $('input', origem.closest('[data-localizador]'));
+  if (!('geolocation' in navigator)) {
+    statusLocal('Seu navegador não informa a localização. Digite seu bairro ou CEP para ver os pets mais perto.', 'erro');
+    campo.focus();
+    return;
+  }
+  statusLocal('Pedindo sua localização…');
+  navigator.geolocation.getCurrentPosition(
+    pos => definirLocal({ lat: pos.coords.latitude, lon: pos.coords.longitude, rotulo: 'sua localização atual' }),
+    err => {
+      statusLocal(err.code === 1
+        ? 'Tudo bem! Sem a sua localização, você pode digitar seu bairro ou CEP para ver os pets mais perto.'
+        : 'Não conseguimos descobrir sua localização agora. Tente digitar seu bairro ou CEP.', 'erro');
+      campo.focus();
+    },
+    { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+  );
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-usar-local]');
+  if (b) usarLocalizacao(b);
+  if (e.target.closest('[data-limpar-local]')) { definirLocal(null); aviso('Localização removida'); }
+});
+document.addEventListener('submit', async e => {
+  const form = e.target.closest('[data-busca-local]');
+  if (!form) return;
+  e.preventDefault();
+  const campo = $('input', form), botao = $('button', form), texto = campo.value.trim();
+  if (texto.length < 3) { statusLocal('Digite uma rua, um bairro ou um CEP (8 números).', 'erro'); campo.focus(); return; }
+  botao.disabled = true; botao.setAttribute('aria-busy', 'true');
+  statusLocal('Buscando endereço…');
+  try {
+    definirLocal(await buscarEndereco(texto));
+    $$('[data-busca-local] input').forEach(i => { i.value = texto; });
+  } catch (erro) {
+    statusLocal(erro instanceof ErroBusca ? esc(erro.message) : 'Não foi possível buscar agora. Verifique sua conexão e tente de novo.', 'erro');
+  } finally {
+    botao.disabled = false; botao.removeAttribute('aria-busy');
+  }
+});
+
+/* Mapas (Leaflet + OpenStreetMap) */
+const temLeaflet = () => typeof window.L !== 'undefined';
+const mapas = {};
+const visivel = el => el && el.getClientRects().length > 0;
+function criarMapa(el) {
+  if (!temLeaflet()) {
+    el.innerHTML = '<p class="mapa-falha">Não foi possível carregar o mapa agora. A lista continua mostrando as distâncias.</p>';
+    return null;
+  }
+  // Com "movimento reduzido" o CSS desliga as transições; o Leaflet precisa saber, senão o zoom trava
+  const animar = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const m = L.map(el, { zoomControl: false, scrollWheelZoom: false, center: CENTRO_PADRAO, zoom: 11,
+    zoomAnimation: animar, fadeAnimation: animar, markerZoomAnimation: animar });
+  L.control.zoom({ zoomInTitle: 'Aproximar', zoomOutTitle: 'Afastar' }).addTo(m);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; colaboradores do <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  }).addTo(m);
+  m.camada = L.layerGroup().addTo(m);
+  return m;
+}
+function mapaPronto(id) {
+  const el = document.getElementById(id);
+  if (!visivel(el)) return null;
+  if (!(id in mapas)) mapas[id] = criarMapa(el);
+  const m = mapas[id];
+  if (m) m.invalidateSize();
+  return m;
+}
+function marcadorVoce(m) {
+  if (!local) return null;
+  return L.marker([local.lat, local.lon], {
+    icon: L.divIcon({ className: '', html: '<span class="pin-voce"></span>', iconSize: [22, 22], iconAnchor: [11, 11] }),
+    title: `Você: ${local.rotulo}`, keyboard: false, zIndexOffset: 1000
+  }).bindTooltip('Você está aqui', { direction: 'top', offset: [0, -10] }).addTo(m.camada);
+}
+function enquadrar(m, pontos) {
+  if (local && pontos.length) {
+    // com localização: enquadra a pessoa e o que está a até 30 km (ou o mais próximo, se nada estiver tão perto)
+    const dist = pt => distanciaKm(local, { lat: pt[0], lon: pt[1] });
+    const perto = pontos.filter(pt => dist(pt) <= 30);
+    pontos = perto.length ? perto : [pontos.reduce((a, b) => (dist(a) <= dist(b) ? a : b))];
+  }
+  if (local) pontos = [...pontos, [local.lat, local.lon]];
+  if (!pontos.length) return m.setView(CENTRO_PADRAO, 11);
+  if (pontos.length === 1) return m.setView(pontos[0], 13, { animate: false });
+  m.fitBounds(pontos, { padding: [36, 36], maxZoom: 13, animate: false });
+}
+let ultimaListaMapa = [];
+function atualizarMapaPets(lista = ultimaListaMapa) {
+  ultimaListaMapa = lista;
+  const m = mapaPronto('mapa-pets');
+  if (!m) return;
+  m.camada.clearLayers();
+  lista.forEach((p, i) => {
+    if (typeof p.latitude !== 'number') return;
+    const perto = Boolean(local) && i === 0;
+    L.circle([p.latitude, p.longitude], {
+      radius: RAIO_PET_M, color: perto ? '#0f5f4c' : '#c0544b', weight: 2, dashArray: '4 4',
+      fillColor: '#f4b4ae', fillOpacity: 0.35, interactive: false
+    }).addTo(m.camada);
+    const rotulo = `${p.nome} – ${textoLocal(p)}${perto ? ' (mais perto de você)' : ''}`;
+    const mk = L.marker([p.latitude, p.longitude], {
+      icon: L.divIcon({ className: '', html: `<span class="pin-pet${perto ? ' pin-perto' : ''}"><img src="${esc(p.foto)}" alt=""></span>`, iconSize: [48, 48], iconAnchor: [24, 24] }),
+      title: rotulo, alt: rotulo, riseOnHover: true
+    }).bindTooltip(esc(rotulo), { direction: 'top', offset: [0, -24] });
+    const abrir = () => { voltarAoFechar = true; location.hash = 'pet/' + p.id; };
+    mk.on('click', abrir);
+    mk.addTo(m.camada);
+    const el = mk.getElement();
+    if (el) {
+      el.setAttribute('aria-label', `${rotulo}. Abrir detalhes`);
+      el.classList.add('mapa-pet', 'mapa-pet-' + p.id);
+      // o Leaflet 1.9 só trata Enter em marcadores com popup; role="button" também deve responder a Espaço
+      el.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); abrir(); } });
+    }
+  });
+  marcadorVoce(m);
+  enquadrar(m, lista.filter(p => typeof p.latitude === 'number').map(p => [p.latitude, p.longitude]));
+}
+
+const PIN_PARCEIRO = '<svg viewBox="0 0 32 42" width="32" height="42" aria-hidden="true"><path d="M16 41S3 26 3 15a13 13 0 0126 0c0 11-13 26-13 26z" fill="#0f5f4c" stroke="#fff" stroke-width="2"/><circle cx="16" cy="15" r="5.5" fill="#f4b4ae"/></svg>';
+function atualizarMapaParceiros(lista) {
+  const m = mapaPronto('mapa-parceiros');
+  if (!m) return;
+  m.camada.clearLayers();
+  lista.forEach(pc => {
+    const rotulo = `${pc.nome} – ${textoLocal(pc)}`;
+    const mk = L.marker([pc.latitude, pc.longitude], {
+      icon: L.divIcon({ className: 'pin-parceiro', html: PIN_PARCEIRO, iconSize: [32, 42], iconAnchor: [16, 41], popupAnchor: [0, -36] }),
+      title: rotulo, alt: rotulo, riseOnHover: true
+    }).bindPopup(`<strong>${esc(pc.nome)}</strong><br>${esc(pc.bairro)}, ${esc(cidadeDe(pc))}${local ? `<br>${textoDistancia(distanciaKm(local, pc))}` : ''}${pc.demonstracao ? '<br><em>Endereço de demonstração</em>' : ''}`);
+    mk.addTo(m.camada);
+    pc._marcador = mk;
+    const el = mk.getElement();
+    if (el) { el.setAttribute('aria-label', rotulo); el.dataset.parceiro = pc.id; }
+  });
+  marcadorVoce(m);
+  if (!m.avisoDemo && lista.some(pc => pc.demonstracao)) {
+    const Aviso = L.Control.extend({ onAdd: () => { const d = L.DomUtil.create('div', 'mapa-demo'); d.innerHTML = `${icone('i-info', 'ic ic-s')}Pontos de demonstração`; return d; } });
+    m.avisoDemo = new Aviso({ position: 'topright' }).addTo(m);
+  }
+  enquadrar(m, lista.map(pc => [pc.latitude, pc.longitude]));
+}
+
+const ESTILO_LOGO = { azul: 'pl-1', preto: 'pl-2', patas: 'pl-3' };
+function desenharParceiros() {
+  const lista = ordenarPorDistancia(PARCEIROS);
+  $('#parceiros-lista').innerHTML = lista.map((pc, i) => `<li class="parceiro${local && i === 0 ? ' parceiro-perto' : ''}">
+    <span class="p-logo ${ESTILO_LOGO[pc.estiloLogo] || 'pl-1'}" aria-hidden="true">${pc.estiloLogo === 'patas' ? '<svg><use href="#i-pata"/></svg>' : ''}${pc.logo.map(esc).join('<br>')}</span>
+    <div class="p-info"><strong>${esc(pc.nome)}</strong><span class="p-dist">${esc(textoLocal(pc))}</span><span>${pc.servicos.map(esc).join(' • ')}</span>
+      <button type="button" class="link-btn p-ver" data-ver-parceiro="${esc(pc.id)}">Ver no mapa<span class="sr">: ${esc(pc.nome)}</span></button></div>
+    <span class="nota" aria-label="Nota ${esc(pc.nota)} de 5">${esc(pc.nota)} ★</span>
+    <div class="p-preco"><span class="off">${pc.desconto}% OFF</span><small>a partir de</small><b>R$ ${esc(pc.precoDesde)}</b></div>
+  </li>`).join('');
+  atualizarMapaParceiros(lista);
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-ver-parceiro]');
+  if (!b) return;
+  const pc = PARCEIROS.find(x => x.id === b.dataset.verParceiro);
+  const m = mapaPronto('mapa-parceiros');
+  if (!m || !pc || !pc._marcador) { aviso('O mapa não está disponível agora'); return; }
+  $('#mapa-parceiros').scrollIntoView({ block: 'center' });
+  m.setView([pc.latitude, pc.longitude], 15, { animate: false });
+  pc._marcador.openPopup();
+});
+
+/* Lista | Mapa (celular) */
+const colunaAnimais = $('#mapa-pets-w').parentElement;
+$$('[data-modo]').forEach(b => b.addEventListener('click', () => {
+  const mapa = b.dataset.modo === 'mapa';
+  colunaAnimais.classList.toggle('modo-mapa', mapa);
+  $$('[data-modo]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  if (mapa) atualizarMapaPets();
+}));
+let redimTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(redimTimer);
+  redimTimer = setTimeout(() => {
+    if (paginaAtual === 'animais') atualizarMapaPets();
+    if (paginaAtual === 'beneficios') desenharParceiros();
+  }, 200);
+});
+
 /* ---------- Detalhes do pet ---------- */
 const dlgPet = $('#dlg-pet');
 let petAberto = null, voltarAoFechar = false, fechandoPorRota = false;
@@ -291,7 +589,7 @@ function abrirPet(id) {
           ${linhaDado('i-pata', 'Raça', p.raca)}
           ${linhaDado(ehFemea(p) ? 'i-femea' : 'i-sexo', 'Sexo', p.sexo)}
           ${linhaDado('i-peso', 'Peso', p.peso)}
-          ${linhaDado('i-local', 'Localização', p.localizacao)}
+          ${linhaDado('i-local', 'Localização', p.bairro ? `${p.bairro}, ${p.localizacao}${local ? ` · ${textoDistancia(distanciaKm(local, p))}` : ''}` : p.localizacao)}
         </dl>
         <div class="pet-acoes">
           <a class="btn" id="quero-adotar" href="${whatsLink(`Olá! Tenho interesse em adotar ${artigo(p)} ${p.nome}`)}" target="_blank" rel="noopener">${icone('i-whats')}Quero adotar<span class="sr"> (abre o WhatsApp em nova aba)</span></a>
@@ -519,6 +817,8 @@ function mostrarPagina(pag, { focar = true, ancora = null } = {}) {
   $$('[data-nav]').forEach(a => a.dataset.nav === pag ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
   document.title = TITULOS[pag];
   if (pag === 'minha-area') desenharMinhaArea();
+  if (pag === 'animais') atualizarMapaPets();
+  if (pag === 'beneficios') desenharParceiros();
   if (pag === 'quiz' && mudou && quiz.passo === -1) quizIntro();
   const alvo = ancora && document.getElementById(ancora);
   if (alvo) {
@@ -561,16 +861,23 @@ window.addEventListener('hashchange', rotear);
 
 /* ---------- Início ---------- */
 async function iniciar() {
+  const [rp, rc] = await Promise.allSettled([ARQUIVO_PETS, ARQUIVO_PARCEIROS].map(async a => {
+    const r = await fetch(a, { cache: 'no-cache' });
+    if (!r.ok) throw new Error(`${a}: ${r.status}`);
+    return r.json();
+  }));
+  if (rc.status === 'fulfilled') PARCEIROS = rc.value;
+  else { console.warn('Não foi possível carregar os parceiros:', rc.reason); $('#parceiros-lista').innerHTML = '<li class="vazio">Não foi possível carregar as unidades parceiras agora.</li>'; }
   try {
-    const r = await fetch(ARQUIVO_PETS, { cache: 'no-cache' });
-    if (!r.ok) throw new Error(r.status);
-    PETS = await r.json();
+    if (rp.status === 'rejected') throw rp.reason;
+    PETS = rp.value;
   } catch (e) {
     console.warn('Não foi possível carregar os pets:', e);
     $('#grade').innerHTML = $('#carrossel').innerHTML = '<p class="vazio">Não foi possível carregar os pets agora. Tente recarregar a página.</p>';
   }
   for (const id of [...favoritos]) if (!PETS.some(p => p.id === id)) favoritos.delete(id);
   desenharCarrossel();
+  if (PARCEIROS.length) desenharParceiros();
   sincronizarFiltros();
   desenharGrade();
   atualizarFavoritos();

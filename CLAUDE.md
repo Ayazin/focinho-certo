@@ -15,6 +15,10 @@
   Nada de barra de navegação inferior estilo app.
 - Textos em português do Brasil.
 - Acessibilidade: contraste AA, alt nas imagens, navegação por teclado.
+- Localização de pets: SEMPRE centro do bairro (máx. 3 casas decimais), nunca endereço de lar temporário.
+  Parceiros usam endereço exato; enquanto forem fictícios, `"demonstracao": true` e avisos de projeto demonstrativo.
+- Nominatim: só sob ação da pessoa (botão Buscar), no máximo 1 requisição/s, com cache. Nunca autocompletar.
+- Testes não usam a internet para mapas/geocodificação (tudo simulado). `FC_MAPA_REAL=1 npm test` usa mapas reais só nos screenshots.
 
 ## Como validar (obrigatório antes de dizer que terminou)
 1. Rodar o site localmente.
